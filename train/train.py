@@ -168,6 +168,10 @@ def train(dataset_dir, year, split, epochs=50, batch_size=8, save_dir='checkpoin
             reduced_loss = strategy.reduce(tf.distribute.ReduceOp.SUM, total_loss, axis=None)
             avg_loss.update_state(reduced_loss)
 
+             # FIX: Correctly handle distributed loss info and reduce it for printing
+            reduced_bce = strategy.reduce(tf.distribute.ReduceOp.SUM, loss_info['bce'], axis=None)
+            reduced_reg = strategy.reduce(tf.distribute.ReduceOp.SUM, loss_info['reg_loss'], axis=None)
+
             if step % 10 == 0:
                 print(f"Step {step}: loss={reduced_loss:.4f}, bce={loss_info['bce']:.4f}, reg={loss_info['reg_loss']:.4f}")
 
