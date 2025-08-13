@@ -1,0 +1,9 @@
+# Ignore compiled Python files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignore ML model files
+*.h5
+*.ckpt

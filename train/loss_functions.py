@@ -1,159 +1,154 @@
-"""
-Losses for region scoring + anchor-based grounding.
-
-Strategy implemented here:
-- For each image, compute IoU between all anchors and the GT box.
-- Anchors with IoU >= pos_iou_thresh are positives (label=1)
-- Anchors with IoU <= neg_iou_thresh are negatives (label=0)
-- Use sigmoid BCE over all anchors (balanced by positives/negatives) for matching
-- For positive anchors compute SmoothL1 loss between predicted deltas and encoded gt deltas
-
-Note: This is a common and robust approach that mirrors detection pipelines.
-"""
-
 import tensorflow as tf
-import numpy as np
-
 
 def iou_boxes(boxes1, boxes2):
     """
-    boxes in [N,4] and [M,4] with x1,y1,x2,y2 normalized.
-    Returns IoU matrix [N, M]
+    Computes Intersection-over-Union (IoU) for a batch of boxes.
+    boxes1: [B, N, 4] and boxes2: [B, M, 4] with normalized coords [y1, x1, y2, x2].
+    Returns IoU matrix: [B, N, M]
     """
-    N = boxes1.shape[0]
-    M = boxes2.shape[0]
-
-    boxes1 = np.expand_dims(boxes1, 1)  # [N,1,4]
-    boxes2 = np.expand_dims(boxes2, 0)  # [1,M,4]
-
-    inter_x1 = np.maximum(boxes1[..., 0], boxes2[..., 0])
-    inter_y1 = np.maximum(boxes1[..., 1], boxes2[..., 1])
-    inter_x2 = np.minimum(boxes1[..., 2], boxes2[..., 2])
-    inter_y2 = np.minimum(boxes1[..., 3], boxes2[..., 3])
-
-    inter_w = np.maximum(0.0, inter_x2 - inter_x1)
-    inter_h = np.maximum(0.0, inter_y2 - inter_y1)
+    # Expand dims for broadcasting
+    boxes1 = tf.expand_dims(boxes1, axis=2)  # [B, N, 1, 4]
+    boxes2 = tf.expand_dims(boxes2, axis=1)  # [B, 1, M, 4]
+    
+    inter_x1 = tf.maximum(boxes1[..., 1], boxes2[..., 1])
+    inter_y1 = tf.maximum(boxes1[..., 0], boxes2[..., 0])
+    inter_x2 = tf.minimum(boxes1[..., 3], boxes2[..., 3])
+    inter_y2 = tf.minimum(boxes1[..., 2], boxes2[..., 2])
+    
+    inter_w = tf.maximum(0.0, inter_x2 - inter_x1)
+    inter_h = tf.maximum(0.0, inter_y2 - inter_y1)
     inter_area = inter_w * inter_h
-
-    area1 = (boxes1[..., 2] - boxes1[..., 0]) * (boxes1[..., 3] - boxes1[..., 1])
-    area2 = (boxes2[..., 2] - boxes2[..., 0]) * (boxes2[..., 3] - boxes2[..., 1])
-
+    
+    area1 = (boxes1[..., 3] - boxes1[..., 1]) * (boxes1[..., 2] - boxes1[..., 0])
+    area2 = (boxes2[..., 3] - boxes2[..., 1]) * (boxes2[..., 2] - boxes2[..., 0])
+    
     union = area1 + area2 - inter_area + 1e-8
     iou = inter_area / union
+    
     return iou
 
 
-def match_anchors_to_gt(anchors_np, gt_boxes_np, pos_iou_thresh=0.5, neg_iou_thresh=0.4):
+def match_anchors_to_gt(anchors_tf, gt_boxes_tf, pos_iou_thresh=0.5, neg_iou_thresh=0.4):
     """
-    anchors_np: [A,4] numpy anchors
-    gt_boxes_np: [G,4] ground-truth boxes for the image (usually G=1 here)
-
+    Matches anchors to ground truth boxes for a batch.
+    anchors_tf: [B, A, 4] anchors (normalized)
+    gt_boxes_tf: [B, G, 4] ground-truth boxes
     Returns:
-      labels: array [A] with 1 for positive, 0 for negative, -1 for ignore
-      matched_gt_boxes: [A,4] where each anchor has the matched GT box (or zeros)
+      labels: [B, A] with 1 for positive, 0 for negative, -1 for ignore
+      matched_gt_boxes: [B, A, 4] where each anchor has its matched GT box
     """
-    A = anchors_np.shape[0]
-    labels = -1 * np.ones((A,), dtype=np.int32)
-    matched_gt = np.zeros((A, 4), dtype=np.float32)
+    B, A = tf.shape(anchors_tf)[0], tf.shape(anchors_tf)[1]
+    
+    # Pad gt_boxes to handle cases with no GTs (e.g., G=0)
+    G = tf.shape(gt_boxes_tf)[1]
+    gt_boxes_padded = tf.pad(gt_boxes_tf, [[0, 0], [0, 1], [0, 0]])
+    G_padded = tf.shape(gt_boxes_padded)[1]
+    
+    # Calculate IoU for the whole batch
+    ious = iou_boxes(anchors_tf, gt_boxes_padded)  # [B, A, G_padded]
+    
+    # Find best IoU for each anchor
+    best_iou_per_anchor = tf.reduce_max(ious, axis=-1)  # [B, A]
+    best_gt_idx_per_anchor = tf.cast(tf.argmax(ious, axis=-1), dtype=tf.int32) # [B, A]
+    
+    # Initialize labels
+    labels = -tf.ones(tf.stack([B, A]), dtype=tf.int32)
+    
+    # Assign positives based on best IoU > threshold
+    pos_mask = best_iou_per_anchor >= pos_iou_thresh
+    labels = tf.where(pos_mask, 1, labels)
 
-    if gt_boxes_np.shape[0] == 0:
-        # no objects -> all negatives
-        labels[:] = 0
-        return labels, matched_gt
-
-    ious = iou_boxes(anchors_np, gt_boxes_np)  # [A, G]
-    best_iou = ious.max(axis=1)
-    best_gt_idx = ious.argmax(axis=1)
-
-    # positives
-    labels[best_iou >= pos_iou_thresh] = 1
-    # negatives
-    labels[best_iou <= neg_iou_thresh] = 0
-
-    # ensure each GT has at least one positive (find anchors with highest IoU per GT)
-    gt_best_for_anchor = ious.argmax(axis=0)  # for each GT, index of anchor with max IoU
-    for gt_i, a_idx in enumerate(gt_best_for_anchor):
-        labels[a_idx] = 1
-        best_gt_idx[a_idx] = gt_i
-
-    # matched gt boxes per anchor
-    matched_gt = gt_boxes_np[best_gt_idx]
-
-    return labels, matched_gt
+    # Assign negatives based on IoU < threshold
+    neg_mask = best_iou_per_anchor < neg_iou_thresh
+    labels = tf.where(neg_mask, 0, labels)
+    
+    # Ensure each GT has at least one positive match
+    best_anchor_idx_per_gt = tf.cast(tf.argmax(ious, axis=1), dtype=tf.int32) # [B, G_padded]
+    batch_indices = tf.range(B, dtype=tf.int32)
+    
+    # For each batch item, get the best anchor index for its one GT box (G=1)
+    if G > 0:
+        indices = tf.stack([batch_indices, best_anchor_idx_per_gt[:, 0]], axis=1) # [B, 2]
+        labels = tf.tensor_scatter_nd_update(labels, indices, tf.ones(B, dtype=tf.int32))
+    
+    # Match each anchor to the corresponding GT box
+    matched_gt_boxes = tf.gather(gt_boxes_padded, best_gt_idx_per_anchor, axis=1, batch_dims=1)
+    
+    return tf.cast(labels, dtype=tf.float32), matched_gt_boxes
 
 
-def matching_and_regression_loss(pred_scores, pred_deltas, anchors_np, gt_boxes_np,
-                                 pos_iou_thresh=0.5, neg_iou_thresh=0.4,
-                                 lambda_reg=1.0):
+def encode_boxes_tf(anchors_tf, matched_gt_tf):
     """
-    pred_scores: [A] predicted logits (before sigmoid) for anchors
-    pred_deltas: [A,4] predicted deltas (tx,ty,tw,th)
-    anchors_np: [A,4] anchor coords
-    gt_boxes_np: [G,4] ground truth boxes for the image
+    Encode ground-truth boxes relative to anchors using standard box deltas.
+    anchors_tf, matched_gt_tf: [B, A, 4] normalized [y1, x1, y2, x2] coords.
+    Returns: deltas [B, A, 4]
+    """
+    eps = 1e-6
 
+    # Convert to center format [cy, cx, h, w]
+    a_cy = (anchors_tf[..., 0] + anchors_tf[..., 2]) / 2.0
+    a_cx = (anchors_tf[..., 1] + anchors_tf[..., 3]) / 2.0
+    a_h = anchors_tf[..., 2] - anchors_tf[..., 0]
+    a_w = anchors_tf[..., 3] - anchors_tf[..., 1]
+    
+    g_cy = (matched_gt_tf[..., 0] + matched_gt_tf[..., 2]) / 2.0
+    g_cx = (matched_gt_tf[..., 1] + matched_gt_tf[..., 3]) / 2.0
+    g_h = matched_gt_tf[..., 2] - matched_gt_tf[..., 0]
+    g_w = matched_gt_tf[..., 3] - matched_gt_tf[..., 1]
+
+    # Calculate deltas
+    ty = (g_cy - a_cy) / (a_h + eps)
+    tx = (g_cx - a_cx) / (a_w + eps)
+    th = tf.math.log((g_h + eps) / (a_h + eps))
+    tw = tf.math.log((g_w + eps) / (a_w + eps))
+
+    # Stack and return
+    deltas = tf.stack([ty, tx, th, tw], axis=-1)
+    return deltas
+
+
+def matching_and_regression_loss(pred_scores, pred_deltas, anchors_tf, gt_boxes_tf,
+                                  pos_iou_thresh=0.5, neg_iou_thresh=0.4, lambda_reg=5.0):
+    """
+    Computes classification and regression loss for a batch.
+    pred_scores: [B, A] predicted logits
+    pred_deltas: [B, A, 4] predicted deltas
+    anchors_tf: [B, A, 4] anchor coordinates
+    gt_boxes_tf: [B, G, 4] ground truth boxes
     Returns: total_loss (scalar), dict of components
     """
-    # match anchors
-    labels, matched_gt = match_anchors_to_gt(anchors_np, gt_boxes_np,
-                                              pos_iou_thresh, neg_iou_thresh)
+    # Match anchors to ground truth for the whole batch
+    labels, matched_gt = match_anchors_to_gt(anchors_tf, gt_boxes_tf, pos_iou_thresh, neg_iou_thresh)
 
-    labels_tf = tf.convert_to_tensor(labels, dtype=tf.float32)  # 1 pos, 0 neg, -1 ignore
-    # create mask for valid anchors
-    valid_mask = tf.where(labels_tf >= 0.0, 1.0, 0.0)
-
-    # classification loss (sigmoid BCE), only over valid anchors
-    probs = tf.sigmoid(pred_scores)
-    bce = tf.keras.losses.binary_crossentropy(labels_tf * valid_mask, probs * valid_mask)
-    # bce returns per-anchor loss; mask out ignored anchors
+    # Classification loss
+    valid_mask = tf.where(labels >= 0.0, 1.0, 0.0)
+    # FIX: Use from_logits=True and pass pred_scores directly.
+    # The labels tensor has shape [B, A], and pred_scores has shape [B, A].
+    # They should have the same shape before applying the loss.
+    # FIX: Manually compute binary cross-entropy with logits.
+    # This ensures the output shape is consistent with the labels and valid_mask.
+    # It also handles numerical stability with logits.
+    bce = tf.nn.sigmoid_cross_entropy_with_logits(labels=labels, logits=pred_scores)
+    
+    # The BCE output now has shape [B, 441], compatible with valid_mask
     bce = tf.reduce_sum(bce * valid_mask) / (tf.reduce_sum(valid_mask) + 1e-6)
 
-    # regression loss for positive anchors only
-    pos_mask = tf.where(labels_tf == 1.0, 1.0, 0.0)
+    # Regression loss (only for positive anchors)
+    pos_mask = tf.where(labels == 1.0, 1.0, 0.0)
     num_pos = tf.reduce_sum(pos_mask)
     reg_loss = 0.0
     if tf.cast(num_pos, tf.int32) > 0:
-        # prepare targets for positives
-        matched_gt_tf = tf.convert_to_tensor(matched_gt, dtype=tf.float32)
-        target_deltas = encode_boxes_np_tf(anchors_np, matched_gt)
-        target_deltas = tf.convert_to_tensor(target_deltas, dtype=tf.float32)
-
-        diff = (pred_deltas - target_deltas) * tf.expand_dims(pos_mask, axis=-1)
-        smooth_l1 = tf.keras.losses.Huber(delta=1.0, reduction=tf.keras.losses.Reduction.SUM)(
-            tf.zeros_like(diff), diff
-        )
-        reg_loss = smooth_l1 / (num_pos + 1e-6)
-    else:
-        reg_loss = tf.constant(0.0)
-
+        # Calculate target deltas for positive anchors
+        target_deltas = encode_boxes_tf(anchors_tf, matched_gt)
+        
+        # Apply mask to both predicted and target deltas
+        pred_deltas_masked = pred_deltas * tf.expand_dims(pos_mask, axis=-1)
+        target_deltas_masked = target_deltas * tf.expand_dims(pos_mask, axis=-1)
+        
+        # Calculate Huber loss on the masked deltas
+        huber_loss_op = tf.keras.losses.Huber(reduction=tf.keras.losses.Reduction.SUM)
+        reg_loss = huber_loss_op(target_deltas_masked, pred_deltas_masked) / (num_pos + 1e-6)
+    
     total_loss = bce + lambda_reg * reg_loss
-    return total_loss, {"bce": bce.numpy().item() if isinstance(bce, tf.Tensor) else float(bce),
-                        "reg_loss": float(reg_loss)}
-
-
-def encode_boxes_np_tf(anchors_np, matched_gt_np):
-    """
-    Helper to compute target deltas using numpy (kept out of TF graph). Returns [A,4]
-    """
-    # reuse encode_boxes function but implemented here inline to avoid circular imports
-    def anchors_to_centers_np(a):
-        x1, y1, x2, y2 = a[:, 0], a[:, 1], a[:, 2], a[:, 3]
-        w = x2 - x1
-        h = y2 - y1
-        cx = x1 + 0.5 * w
-        cy = y1 + 0.5 * h
-        return np.stack([cx, cy, w, h], axis=-1)
-
-    a_cent = anchors_to_centers_np(anchors_np)
-    g_cent = anchors_to_centers_np(matched_gt_np)
-
-    ax, ay, aw, ah = a_cent[:, 0], a_cent[:, 1], a_cent[:, 2], a_cent[:, 3]
-    gx, gy, gw, gh = g_cent[:, 0], g_cent[:, 1], g_cent[:, 2], g_cent[:, 3]
-
-    eps = 1e-6
-    tx = (gx - ax) / (aw + eps)
-    ty = (gy - ay) / (ah + eps)
-    tw = np.log((gw + eps) / (aw + eps))
-    th = np.log((gh + eps) / (ah + eps))
-
-    return np.stack([tx, ty, tw, th], axis=-1).astype(np.float32)
-
+    
+    return total_loss, {"bce": bce, "reg_loss": reg_loss}

@@ -5,54 +5,44 @@ returned in normalized form (x1, y1, x2, y2) relative to image width/height.
 """
 
 import numpy as np
+import tensorflow as tf
 
-def generate_anchors_for_feature_map(feat_h, feat_w, image_size=(224, 224), scales=(32, 64, 128), ratios=(0.5, 1.0, 2.0)):
+def generate_anchor_boxes(Hf, Wf, anchors_per_region, 
+                           image_height=224, image_width=224,
+                           scales=[0.5, 1.0, 2.0], aspect_ratios=[0.5, 1.0, 2.0]):
     """
-    Generate anchors centered on each cell of a feature map.
-
-    Args:
-        feat_h, feat_w: feature map spatial dims (e.g., 7,7)
-        image_size: (H, W) of input image
-        scales: list/tuple of scales (in pixels) relative to original image
-        ratios: list/tuple of aspect ratios (h/w)
+    Generate normalized anchor boxes for an Hf x Wf feature map.
 
     Returns:
-        anchors: np.array of shape [R*B, 4] where R = feat_h*feat_w, B = len(scales)*len(ratios)
-                 each row = [x1, y1, x2, y2] normalized to [0,1]
+        boxes: [Hf*Wf*anchors_per_region, 4] in normalized coords (ymin, xmin, ymax, xmax)
     """
-    img_h, img_w = image_size
-    stride_h = img_h / feat_h
-    stride_w = img_w / feat_w
+    # Step size in original image
+    stride_y = image_height / Hf
+    stride_x = image_width / Wf
 
-    #centers of the cells
-    centers_y = (np.arange(feat_h) + 0.5) * stride_h
-    centers_x = (np.arange(feat_w) + 0.5) * stride_w
-    centers = np.stack(np.meshgrid(centers_x, centers_y), axis=-1)  #[feat_h, feat_w, 2] x,y
+    # Centers of each cell in original image coords
+    cy = np.arange(stride_y/2, image_height, stride_y)
+    cx = np.arange(stride_x/2, image_width, stride_x)
+
+    centers = [(x, y) for y in cy for x in cx]  # (x_center, y_center)
 
     anchors = []
-    for i in range(feat_h):
-        for j in range(feat_w):
-            cx = centers[i, j, 0]
-            cy = centers[i, j, 1]
-            for scale in scales:
-                for ratio in ratios:
-                    #compute box size
-                    w = scale*np.sqrt(1.0/ratio)
-                    h = scale*np.sqrt(ratio)
+    for (x_center, y_center) in centers:
+        for scale in scales:
+            for ratio in aspect_ratios:
+                # Compute anchor box height/width
+                h = scale * stride_y * np.sqrt(ratio)
+                w = scale * stride_x / np.sqrt(ratio)
 
-                    x1 = (cx - w / 2.0) / img_w
-                    y1 = (cy - h / 2.0) / img_h
-                    x2 = (cx + w / 2.0) / img_w
-                    y2 = (cy + h / 2.0) / img_h
+                ymin = (y_center - h/2) / image_height
+                xmin = (x_center - w/2) / image_width
+                ymax = (y_center + h/2) / image_height
+                xmax = (x_center + w/2) / image_width
 
-                    #clip to [0,1]
-                    x1 = max(0.0, x1); y1 = max(0.0, y1)
-                    x2 = min(1.0, x2); y2 = min(1.0, y2)
+                anchors.append([ymin, xmin, ymax, xmax])
 
-                    anchors.append([x1, y1, x2, y2])
-
-    anchors = np.array(anchors, dtype=np.float32)
-    return anchors 
+    anchors = np.clip(anchors, 0, 1)  # ensure within image bounds
+    return tf.constant(anchors, dtype=tf.float32)
 
 def anchors_to_centers(anchors):
     """Convert [x1,y1,x2,y2] to center format [cx,cy,w,h] (normalized)."""
