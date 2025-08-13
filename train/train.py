@@ -16,7 +16,7 @@ from models.grounding_model import VisualGroundingModel
 from data.anchor_utils import generate_anchor_boxes, decode_boxes_from_deltas
 from train.loss_functions import matching_and_regression_loss
 
-# --- FIX: Re-correct the Dataset loader to avoid `[0]` index on tokenizer output ---
+# --- The RefCOCODataset class has a minor fix for consistency ---
 class RefCOCODataset():
     def __init__(self, ann_file, img_root, image_size=(224, 224), tokenizer=None):
         self.img_root = img_root
@@ -99,13 +99,13 @@ class RefCOCODataset():
 
         return img, input_ids, attention_mask, bbox
 
+# --- The collate_batch function is no longer needed with this dataset setup ---
+
 def train(dataset_dir, year, split, epochs=50, batch_size=8, save_dir='checkpoints', anchors=None):
     if anchors is None:
         raise ValueError("The 'anchors' tensor must be passed to the train function.")
 
-    strategy = tf.distribute.MirroredStrategy()
-    print('Number of devices: {}'.format(strategy.num_replicas_in_sync))
-
+    # --- FIX: Removed MirroredStrategy and related code ---
     image_size = (224, 224)
     feat_h, feat_w = 7, 7
     
@@ -126,35 +126,36 @@ def train(dataset_dir, year, split, epochs=50, batch_size=8, save_dir='checkpoin
     dataset_tf = tf.data.Dataset.from_generator(gen, output_types=out_types, output_shapes=output_shapes)
     dataset_tf = dataset_tf.batch(batch_size).prefetch(tf.data.AUTOTUNE)
 
-    with strategy.scope():
-        vocab_size = tokenizer.vocab_size
-        num_regions = feat_h * feat_w
-        anchors_per_region = tf.shape(anchors)[0] // (feat_h * feat_w)
-        
-        model = VisualGroundingModel(vocab_size=vocab_size,
-                                      num_regions=num_regions,
-                                      anchors_per_region=anchors_per_region)
-        optimizer = tf.keras.optimizers.Adam(1e-4)
+    # --- Model and optimizer setup, now for a single GPU ---
+    vocab_size = tokenizer.vocab_size
+    num_regions = feat_h * feat_w
+    anchors_per_region = tf.shape(anchors)[0] // (feat_h * feat_w)
+    
+    model = VisualGroundingModel(vocab_size=vocab_size,
+                                  num_regions=num_regions,
+                                  anchors_per_region=anchors_per_region)
+    optimizer = tf.keras.optimizers.Adam(1e-4)
 
-        @tf.function
-        def train_step(images, input_ids, attention_mask, gt_boxes):
-            with tf.GradientTape() as tape:
-                anchors_batched = tf.tile(tf.expand_dims(anchors, axis=0), [tf.shape(images)[0], 1, 1])
-                gt_boxes_reshaped = tf.expand_dims(gt_boxes, axis=1)
+    # --- FIX: Single-GPU training loop, back to the basics ---
+    @tf.function
+    def train_step(images, input_ids, attention_mask, gt_boxes):
+        with tf.GradientTape() as tape:
+            anchors_batched = tf.tile(tf.expand_dims(anchors, axis=0), [tf.shape(images)[0], 1, 1])
+            gt_boxes_reshaped = tf.expand_dims(gt_boxes, axis=1)
 
-                preds = model(images, input_ids, attention_mask, anchors_batched, training=True)
-                scores = preds['scores']
-                deltas = preds['deltas']
-                
-                total_loss, loss_info = matching_and_regression_loss(
-                    scores, deltas, anchors_batched, gt_boxes_reshaped,
-                    pos_iou_thresh=0.5, neg_iou_thresh=0.4, lambda_reg=5.0
-                )
-
-            grads = tape.gradient(total_loss, model.trainable_variables)
-            optimizer.apply_gradients(zip(grads, model.trainable_variables))
+            preds = model(images, input_ids, attention_mask, anchors_batched, training=True)
+            scores = preds['scores']
+            deltas = preds['deltas']
             
-            return total_loss, loss_info
+            total_loss, loss_info = matching_and_regression_loss(
+                scores, deltas, anchors_batched, gt_boxes_reshaped,
+                pos_iou_thresh=0.5, neg_iou_thresh=0.4, lambda_reg=5.0
+            )
+
+        grads = tape.gradient(total_loss, model.trainable_variables)
+        optimizer.apply_gradients(zip(grads, model.trainable_variables))
+        
+        return total_loss, loss_info
 
     for epoch in range(epochs):
         print(f"\nStarting epoch {epoch + 1}/{epochs} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -162,18 +163,12 @@ def train(dataset_dir, year, split, epochs=50, batch_size=8, save_dir='checkpoin
         avg_loss = tf.keras.metrics.Mean(name='total_loss')
         
         for step, (images, input_ids, attention_mask, gt_boxes) in enumerate(dataset_tf):
-            total_loss, loss_info = strategy.run(train_step, args=(images, input_ids, attention_mask, gt_boxes))
+            total_loss, loss_info = train_step(images, input_ids, attention_mask, gt_boxes)
             
-            # The strategy.run returns results per replica, so we need to reduce the loss
-            reduced_loss = strategy.reduce(tf.distribute.ReduceOp.SUM, total_loss, axis=None)
-            avg_loss.update_state(reduced_loss)
-
-             # FIX: Correctly handle distributed loss info and reduce it for printing
-            reduced_bce = strategy.reduce(tf.distribute.ReduceOp.SUM, loss_info['bce'], axis=None)
-            reduced_reg = strategy.reduce(tf.distribute.ReduceOp.SUM, loss_info['reg_loss'], axis=None)
+            avg_loss.update_state(total_loss)
 
             if step % 10 == 0:
-                print(f"Step {step}: loss={reduced_loss:.4f}, bce={loss_info['bce']:.4f}, reg={loss_info['reg_loss']:.4f}")
+                print(f"Step {step}: loss={total_loss:.4f}, bce={loss_info['bce']:.4f}, reg={loss_info['reg_loss']:.4f}")
 
         print(f"Epoch {epoch + 1} finished. Avg Loss: {avg_loss.result().numpy():.4f}")
         
