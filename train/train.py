@@ -108,11 +108,9 @@ def train(dataset_dir, year, split, epochs=50, batch_size=8, save_dir='checkpoin
     if anchors is None:
         raise ValueError("The 'anchors' tensor must be passed to the train function.")
 
-    # FIX: Use MirroredStrategy to distribute the training across available GPUs
     strategy = tf.distribute.MirroredStrategy()
     print('Number of devices: {}'.format(strategy.num_replicas_in_sync))
 
-    # The batch size per replica needs to be calculated
     per_replica_batch_size = batch_size // strategy.num_replicas_in_sync
 
     image_size = (224, 224)
@@ -132,38 +130,37 @@ def train(dataset_dir, year, split, epochs=50, batch_size=8, save_dir='checkpoin
     dataset_tf = tf.data.Dataset.from_generator(gen, output_types=out_types)
     dataset_tf = dataset_tf.batch(per_replica_batch_size).prefetch(tf.data.AUTOTUNE)
 
-    # Everything related to model creation must be done within the strategy scope
     with strategy.scope():
+        # Everything related to model creation and the training step must be in this scope
         vocab_size = tokenizer.vocab_size
         num_regions = feat_h * feat_w
         anchors_per_region = tf.shape(anchors)[0] // (feat_h * feat_w)
         
-        # FIX: The model is now created correctly within the scope.
         model = VisualGroundingModel(vocab_size=vocab_size,
                                       num_regions=num_regions,
                                       anchors_per_region=anchors_per_region)
         optimizer = tf.keras.optimizers.Adam(1e-4)
 
-    # FIX: Define the training step as a distributed function
-    @tf.function
-    def train_step(images, input_ids, attention_mask, gt_boxes):
-        with tf.GradientTape() as tape:
-            anchors_batched = tf.tile(tf.expand_dims(anchors, axis=0), [tf.shape(images)[0], 1, 1])
-            gt_boxes_reshaped = tf.expand_dims(gt_boxes, axis=1)
+        # FIX: The training step is now defined inside the strategy scope
+        @tf.function
+        def train_step(images, input_ids, attention_mask, gt_boxes):
+            with tf.GradientTape() as tape:
+                anchors_batched = tf.tile(tf.expand_dims(anchors, axis=0), [tf.shape(images)[0], 1, 1])
+                gt_boxes_reshaped = tf.expand_dims(gt_boxes, axis=1)
 
-            preds = model(images, input_ids, attention_mask, anchors_batched, training=True)
-            scores = preds['scores']
-            deltas = preds['deltas']
+                preds = model(images, input_ids, attention_mask, anchors_batched, training=True)
+                scores = preds['scores']
+                deltas = preds['deltas']
+                
+                total_loss, loss_info = matching_and_regression_loss(
+                    scores, deltas, anchors_batched, gt_boxes_reshaped,
+                    pos_iou_thresh=0.5, neg_iou_thresh=0.4, lambda_reg=5.0
+                )
+
+            grads = tape.gradient(total_loss, model.trainable_variables)
+            optimizer.apply_gradients(zip(grads, model.trainable_variables))
             
-            total_loss, loss_info = matching_and_regression_loss(
-                scores, deltas, anchors_batched, gt_boxes_reshaped,
-                pos_iou_thresh=0.5, neg_iou_thresh=0.4, lambda_reg=5.0
-            )
-
-        grads = tape.gradient(total_loss, model.trainable_variables)
-        optimizer.apply_gradients(zip(grads, model.trainable_variables))
-        
-        return total_loss, loss_info
+            return total_loss, loss_info
 
     for epoch in range(epochs):
         print(f"\nStarting epoch {epoch + 1}/{epochs} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -171,7 +168,6 @@ def train(dataset_dir, year, split, epochs=50, batch_size=8, save_dir='checkpoin
         avg_loss = tf.keras.metrics.Mean(name='total_loss')
         
         for step, (images, input_ids, attention_mask, gt_boxes) in enumerate(dataset_tf):
-            # FIX: The training step is now called correctly
             total_loss, loss_info = train_step(images, input_ids, attention_mask, gt_boxes)
             
             avg_loss.update_state(total_loss)
