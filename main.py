@@ -57,13 +57,13 @@ def main():
     )
     # The anchors are in [y1, x1, y2, x2] format and normalized [0,1]
 
-    kaggle_dataset_dir = '/kaggle/input/datasetscenelocalization/data'
+    kaggle_dataset_dir = '/kaggle/input/datasetscenelocalization/'
     train_year = '2014' # Hardcoding for train data.
     train_split = 'train' # Hardcoding for train data.
 
     if args.mode == 'train':
-        annotations_path = os.path.join(kaggle_dataset_dir, 'coco', 'annotations', f'instances_{train_split}{train_year}.json')
-        images_dir = os.path.join(kaggle_dataset_dir, 'coco', f'{train_split}{train_year}')
+        annotations_path = os.path.join(kaggle_dataset_dir, 'annotations_trainval2014', 'annotations', f'instances_{train_split}{train_year}.json')
+        images_dir = os.path.join(kaggle_dataset_dir, f'{train_split}{train_year}', f'{train_split}{train_year}')
 
         if not os.path.exists(annotations_path) or not os.path.exists(images_dir):
             raise FileNotFoundError(f"Kaggle data not found at {annotations_path} and {images_dir}")
