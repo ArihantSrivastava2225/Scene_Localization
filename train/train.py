@@ -106,6 +106,7 @@ def train(dataset_dir, year, split, epochs=50, batch_size=8, save_dir='checkpoin
     strategy = tf.distribute.MirroredStrategy()
     print('Number of devices: {}'.format(strategy.num_replicas_in_sync))
 
+    # The batch size per replica needs to be calculated
     per_replica_batch_size = batch_size // strategy.num_replicas_in_sync
 
     image_size = (224, 224)
@@ -123,7 +124,9 @@ def train(dataset_dir, year, split, epochs=50, batch_size=8, save_dir='checkpoin
     
     out_types = (tf.float32, tf.int32, tf.int32, tf.float32)
     dataset_tf = tf.data.Dataset.from_generator(gen, output_types=out_types)
-    dataset_tf = dataset_tf.batch(per_replica_batch_size).prefetch(tf.data.AUTOTUNE)
+    # FIX: Use `batch(batch_size)` instead of `per_replica_batch_size`.
+    # `MirroredStrategy` will handle the distribution of this batch.
+    dataset_tf = dataset_tf.batch(batch_size).prefetch(tf.data.AUTOTUNE)
 
     with strategy.scope():
         vocab_size = tokenizer.vocab_size
@@ -135,7 +138,7 @@ def train(dataset_dir, year, split, epochs=50, batch_size=8, save_dir='checkpoin
                                       anchors_per_region=anchors_per_region)
         optimizer = tf.keras.optimizers.Adam(1e-4)
         
-        # FIX: The training step MUST be defined inside the strategy.scope()
+        # This function is correct now. It will be called by strategy.run.
         @tf.function
         def train_step(images, input_ids, attention_mask, gt_boxes):
             with tf.GradientTape() as tape:
@@ -161,13 +164,18 @@ def train(dataset_dir, year, split, epochs=50, batch_size=8, save_dir='checkpoin
         
         avg_loss = tf.keras.metrics.Mean(name='total_loss')
         
-        for step, (images, input_ids, attention_mask, gt_boxes) in enumerate(dataset_tf):
-            total_loss, loss_info = train_step(images, input_ids, attention_mask, gt_boxes)
+        # The dataset iterator should be created for each epoch to avoid issues with MirroredStrategy
+        dist_dataset = strategy.experimental_distribute_dataset(dataset_tf)
+        
+        for step, (images, input_ids, attention_mask, gt_boxes) in enumerate(dist_dataset):
+            total_loss, loss_info = strategy.run(train_step, args=(images, input_ids, attention_mask, gt_boxes))
             
-            avg_loss.update_state(total_loss)
+            # The loss from each replica needs to be reduced
+            reduced_loss = strategy.reduce(tf.distribute.ReduceOp.SUM, total_loss, axis=None)
+            avg_loss.update_state(reduced_loss)
 
             if step % 10 == 0:
-                print(f"Step {step}: loss={total_loss:.4f}, bce={loss_info['bce']:.4f}, reg={loss_info['reg_loss']:.4f}")
+                print(f"Step {step}: loss={reduced_loss:.4f}, bce={loss_info['bce']:.4f}, reg={loss_info['reg_loss']:.4f}")
 
         print(f"Epoch {epoch + 1} finished. Avg Loss: {avg_loss.result().numpy():.4f}")
         
