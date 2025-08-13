@@ -56,55 +56,48 @@ def main():
         aspect_ratios=anchor_ratios
     )
     # The anchors are in [y1, x1, y2, x2] format and normalized [0,1]
-    
-    if args.mode == 'train':
-        if args.dataset_dir is None:
-            raise ValueError('Please provide --dataset_dir for COCO dataset')
 
-        annotations_path = os.path.join(
-            args.dataset_dir, 'coco', 'annotations', f'instances_{args.split}{args.year}.json'
-        )
-        images_dir = os.path.join(
-            args.dataset_dir, 'coco', f'{args.split}{args.year}'
-        )
+    kaggle_dataset_dir = '/kaggle/input/datasetscenelocalization/data'
+    train_year = '2014' # Hardcoding for train data.
+    train_split = 'train' # Hardcoding for train data.
+
+    if args.mode == 'train':
+        annotations_path = os.path.join(kaggle_dataset_dir, 'coco', 'annotations', f'instances_{train_split}{train_year}.json')
+        images_dir = os.path.join(kaggle_dataset_dir, 'coco', f'{train_split}{train_year}')
 
         if not os.path.exists(annotations_path) or not os.path.exists(images_dir):
-            raise FileNotFoundError(f"COCO split not found at {annotations_path} and {images_dir}")
+            raise FileNotFoundError(f"Kaggle data not found at {annotations_path} and {images_dir}")
 
         train(
-            dataset_dir=f'{args.dataset_dir}\\coco',
-            year=args.year,
-            split=args.split,
+            dataset_dir=kaggle_dataset_dir,
+            year=train_year,
+            split=train_split,
             epochs=50,
             batch_size=8,
-            save_dir='checkpoints6',
-            anchors=anchors # Corrected: passing the pre-computed anchors
+            save_dir='/kaggle/working/checkpoints6', # FIX: Use Kaggle's working directory
+            anchors=anchors
         )
 
     elif args.mode == 'infer':
         if args.image is None or args.query is None or args.ckpt is None:
             raise ValueError('Provide --image, --query, and --ckpt for inference')
 
-        # FIX: Match training constants
         vocab_size = BertTokenizer.from_pretrained('bert-base-uncased').vocab_size
         max_query_len = 20
         num_regions = feat_h * feat_w
     
-        # --- 4. Build model ---
         model = VisualGroundingModel(
             vocab_size=vocab_size,
             num_regions=num_regions,
             anchors_per_region=anchors_per_region
         )
-        # We need to build the model by providing a dummy input with the full signature
         model.build(input_shape=[(None, image_size[0], image_size[1], 3), (None, max_query_len), (None, max_query_len), (None, anchors.shape[0], 4)])
         model.load_weights(args.ckpt)
 
-        # --- 5. Inference ---
         decoded_boxes, scores = infer_and_visualize(
             model,
             args.image,
-            args.query, # FIX: Pass the raw query string for `infer.py` to handle
+            args.query,
             image_size=image_size,
             feat_h=feat_h,
             feat_w=feat_w,
