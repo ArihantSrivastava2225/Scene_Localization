@@ -73,8 +73,8 @@ def main():
             year=train_year,
             split=train_split,
             epochs=50,
-            batch_size=8,
-            save_dir='/kaggle/working/checkpoints6', # FIX: Use Kaggle's working directory
+            batch_size=32,
+            save_dir='/kaggle/working/checkpointskaggle', # FIX: Use Kaggle's working directory
             anchors=anchors
         )
 
