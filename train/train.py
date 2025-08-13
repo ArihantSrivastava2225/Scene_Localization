@@ -155,8 +155,8 @@ def train(dataset_dir, year, split, epochs=10, batch_size=8, save_dir='checkpoin
         raise ValueError("The 'anchors' tensor must be passed to the train function.")
 
     # dataset setup (rest remains the same)
-    ann_file = os.path.join(dataset_dir, 'annotations', f'instances_{split}{year}.json')
-    img_root = os.path.join(dataset_dir, f'{split}{year}')
+    ann_file = os.path.join(dataset_dir, 'annotations_trainval2014', 'annotations', f'instances_{split}{year}.json')
+    img_root = os.path.join(dataset_dir, f'{split}{year}', f'{split}{year}')
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
     dataset = RefCOCODataset(ann_file, img_root, image_size=image_size, tokenizer=tokenizer)
     
