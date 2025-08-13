@@ -86,8 +86,6 @@ class RefCOCODataset():
                 truncation=True,
                 return_tensors='tf',
             )
-            # FIX: Return the full tensors directly, without indexing.
-            # The shape will be [1, 20] instead of [20].
             input_ids = encoding['input_ids']
             attention_mask = encoding['attention_mask']
         else:
@@ -96,13 +94,10 @@ class RefCOCODataset():
             attention_mask = np.array([1 if t > 0 else 0 for t in input_ids[0]])
             attention_mask = np.expand_dims(attention_mask, axis=0)
         
-        # We need to flatten the input_ids and attention_mask tensors
         input_ids = tf.squeeze(input_ids, axis=0)
         attention_mask = tf.squeeze(attention_mask, axis=0)
 
         return img, input_ids, attention_mask, bbox
-
-# --- The collate_batch function is no longer needed with this dataset setup ---
 
 def train(dataset_dir, year, split, epochs=50, batch_size=8, save_dir='checkpoints', anchors=None):
     if anchors is None:
@@ -131,7 +126,6 @@ def train(dataset_dir, year, split, epochs=50, batch_size=8, save_dir='checkpoin
     dataset_tf = dataset_tf.batch(per_replica_batch_size).prefetch(tf.data.AUTOTUNE)
 
     with strategy.scope():
-        # Everything related to model creation and the training step must be in this scope
         vocab_size = tokenizer.vocab_size
         num_regions = feat_h * feat_w
         anchors_per_region = tf.shape(anchors)[0] // (feat_h * feat_w)
@@ -140,8 +134,8 @@ def train(dataset_dir, year, split, epochs=50, batch_size=8, save_dir='checkpoin
                                       num_regions=num_regions,
                                       anchors_per_region=anchors_per_region)
         optimizer = tf.keras.optimizers.Adam(1e-4)
-
-        # FIX: The training step is now defined inside the strategy scope
+        
+        # FIX: The training step MUST be defined inside the strategy.scope()
         @tf.function
         def train_step(images, input_ids, attention_mask, gt_boxes):
             with tf.GradientTape() as tape:
