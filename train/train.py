@@ -106,9 +106,6 @@ def train(dataset_dir, year, split, epochs=50, batch_size=8, save_dir='checkpoin
     strategy = tf.distribute.MirroredStrategy()
     print('Number of devices: {}'.format(strategy.num_replicas_in_sync))
 
-    # The batch size per replica needs to be calculated
-    per_replica_batch_size = batch_size // strategy.num_replicas_in_sync
-
     image_size = (224, 224)
     feat_h, feat_w = 7, 7
     
@@ -121,11 +118,12 @@ def train(dataset_dir, year, split, epochs=50, batch_size=8, save_dir='checkpoin
         max_samples = 5000
         for i in range(min(len(dataset), max_samples)):
             yield dataset[i]
-    
+
     out_types = (tf.float32, tf.int32, tf.int32, tf.float32)
-    dataset_tf = tf.data.Dataset.from_generator(gen, output_types=out_types)
-    # FIX: Use `batch(batch_size)` instead of `per_replica_batch_size`.
-    # `MirroredStrategy` will handle the distribution of this batch.
+    # FIX: Add output_shapes to explicitly define the shape of each element
+    output_shapes = (tf.TensorShape(image_size + (3,)), tf.TensorShape([20]), tf.TensorShape([20]), tf.TensorShape([4]))
+    
+    dataset_tf = tf.data.Dataset.from_generator(gen, output_types=out_types, output_shapes=output_shapes)
     dataset_tf = dataset_tf.batch(batch_size).prefetch(tf.data.AUTOTUNE)
 
     with strategy.scope():
@@ -137,8 +135,7 @@ def train(dataset_dir, year, split, epochs=50, batch_size=8, save_dir='checkpoin
                                       num_regions=num_regions,
                                       anchors_per_region=anchors_per_region)
         optimizer = tf.keras.optimizers.Adam(1e-4)
-        
-        # This function is correct now. It will be called by strategy.run.
+
         @tf.function
         def train_step(images, input_ids, attention_mask, gt_boxes):
             with tf.GradientTape() as tape:
@@ -164,13 +161,10 @@ def train(dataset_dir, year, split, epochs=50, batch_size=8, save_dir='checkpoin
         
         avg_loss = tf.keras.metrics.Mean(name='total_loss')
         
-        # The dataset iterator should be created for each epoch to avoid issues with MirroredStrategy
-        dist_dataset = strategy.experimental_distribute_dataset(dataset_tf)
-        
-        for step, (images, input_ids, attention_mask, gt_boxes) in enumerate(dist_dataset):
+        for step, (images, input_ids, attention_mask, gt_boxes) in enumerate(dataset_tf):
             total_loss, loss_info = strategy.run(train_step, args=(images, input_ids, attention_mask, gt_boxes))
             
-            # The loss from each replica needs to be reduced
+            # The strategy.run returns results per replica, so we need to reduce the loss
             reduced_loss = strategy.reduce(tf.distribute.ReduceOp.SUM, total_loss, axis=None)
             avg_loss.update_state(reduced_loss)
 
