@@ -76,7 +76,6 @@ class VisualGroundingModel(tf.keras.Model):
         # Apply the regression head to the same attended features
         deltas = self.reg_head(attended_feats) # Shape: [B, R*A, 4]
 
-
         # FIX: The original code returned a tiled version of 'all_anchors', which was an issue.
         # Now, `all_anchors` is already batched correctly and should be returned directly.
         return {"scores": scores_reshaped, "deltas": deltas, "anchors": all_anchors}
