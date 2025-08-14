@@ -115,7 +115,8 @@ def train(dataset_dir, year, split, epochs=50, batch_size=8, save_dir='checkpoin
     dataset = RefCOCODataset(ann_file, img_root, image_size=image_size, tokenizer=tokenizer)
     
     def gen():
-        for i in range(len(dataset)):
+        max_samples = 10000
+        for i in range(min(len(dataset), max_samples)):
             yield dataset[i]
 
     out_types = (tf.float32, tf.int32, tf.int32, tf.float32)
