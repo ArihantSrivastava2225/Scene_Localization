@@ -101,11 +101,10 @@ class RefCOCODataset():
 
 # --- The collate_batch function is no longer needed with this dataset setup ---
 
-def train(dataset_dir, year, split, epochs=50, batch_size=8, save_dir='checkpoints', anchors=None):
+def train(dataset_dir, year, split, epochs=10, batch_size=8, save_dir='checkpoints', anchors=None):
     if anchors is None:
         raise ValueError("The 'anchors' tensor must be passed to the train function.")
 
-    # --- FIX: Removed MirroredStrategy and related code ---
     image_size = (224, 224)
     feat_h, feat_w = 7, 7
     
@@ -120,13 +119,11 @@ def train(dataset_dir, year, split, epochs=50, batch_size=8, save_dir='checkpoin
             yield dataset[i]
 
     out_types = (tf.float32, tf.int32, tf.int32, tf.float32)
-    # FIX: Add output_shapes to explicitly define the shape of each element
     output_shapes = (tf.TensorShape(image_size + (3,)), tf.TensorShape([20]), tf.TensorShape([20]), tf.TensorShape([4]))
     
     dataset_tf = tf.data.Dataset.from_generator(gen, output_types=out_types, output_shapes=output_shapes)
     dataset_tf = dataset_tf.batch(batch_size).prefetch(tf.data.AUTOTUNE)
 
-    # --- Model and optimizer setup, now for a single GPU ---
     vocab_size = tokenizer.vocab_size
     num_regions = feat_h * feat_w
     anchors_per_region = tf.shape(anchors)[0] // (feat_h * feat_w)
@@ -134,11 +131,17 @@ def train(dataset_dir, year, split, epochs=50, batch_size=8, save_dir='checkpoin
     model = VisualGroundingModel(vocab_size=vocab_size,
                                   num_regions=num_regions,
                                   anchors_per_region=anchors_per_region)
-    optimizer = tf.keras.optimizers.Adam(1e-4)
+    
+    # Build the model with a dummy input to initialize weights
+    dummy_image = tf.random.uniform((1, image_size[0], image_size[1], 3))
+    dummy_ids = tf.zeros((1, 20), dtype=tf.int32)
+    dummy_mask = tf.zeros((1, 20), dtype=tf.int32)
+    dummy_anchors = tf.zeros((1, anchors.shape[0], 4))
+    _ = model(dummy_image, dummy_ids, dummy_mask, dummy_anchors)
 
-    # --- FIX: Single-GPU training loop, back to the basics ---
+    # --- Training step function ---
     @tf.function
-    def train_step(images, input_ids, attention_mask, gt_boxes):
+    def train_step(images, input_ids, attention_mask, gt_boxes, optimizer):
         with tf.GradientTape() as tape:
             anchors_batched = tf.tile(tf.expand_dims(anchors, axis=0), [tf.shape(images)[0], 1, 1])
             gt_boxes_reshaped = tf.expand_dims(gt_boxes, axis=1)
@@ -157,20 +160,52 @@ def train(dataset_dir, year, split, epochs=50, batch_size=8, save_dir='checkpoin
         
         return total_loss, loss_info
 
-    for epoch in range(epochs):
-        print(f"\nStarting epoch {epoch + 1}/{epochs} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        
+    # --- Phase 1: Train with frozen encoders (for a few epochs) ---
+    initial_epochs = 3
+    initial_learning_rate = 1e-4
+    print(f"\n--- Starting Phase 1: Training top layers with frozen encoders (for {initial_epochs} epochs) ---")
+    
+    # Ensure encoders are frozen
+    model.image_encoder.trainable = False
+    model.text_encoder.trainable = False
+    optimizer = tf.keras.optimizers.Adam(learning_rate=initial_learning_rate)
+    
+    for epoch in range(initial_epochs):
+        print(f"\nStarting epoch {epoch + 1}/{initial_epochs} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         avg_loss = tf.keras.metrics.Mean(name='total_loss')
         
         for step, (images, input_ids, attention_mask, gt_boxes) in enumerate(dataset_tf):
-            total_loss, loss_info = train_step(images, input_ids, attention_mask, gt_boxes)
-            
+            total_loss, loss_info = train_step(images, input_ids, attention_mask, gt_boxes, optimizer)
             avg_loss.update_state(total_loss)
 
             if step % 10 == 0:
                 print(f"Step {step}: loss={total_loss:.4f}, bce={loss_info['bce']:.4f}, reg={loss_info['reg_loss']:.4f}")
-
-        print(f"Epoch {epoch + 1} finished. Avg Loss: {avg_loss.result().numpy():.4f}")
         
+        print(f"Epoch {epoch + 1} finished. Avg Loss: {avg_loss.result().numpy():.4f}")
+        os.makedirs(save_dir, exist_ok=True)
+        model.save_weights(os.path.join(save_dir, f'model_epoch_{epoch+1}.weights.h5'))
+
+    # --- Phase 2: Unfreeze and fine-tune encoders (for remaining epochs) ---
+    fine_tuning_epochs = epochs - initial_epochs
+    fine_tuning_learning_rate = 1e-5
+    print(f"\n--- Starting Phase 2: Fine-tuning encoders with low learning rate (for {fine_tuning_epochs} epochs) ---")
+    
+    # Unfreeze encoders for fine-tuning
+    model.image_encoder.trainable = True
+    model.text_encoder.trainable = True
+    optimizer = tf.keras.optimizers.Adam(learning_rate=fine_tuning_learning_rate)
+    
+    for epoch in range(initial_epochs, epochs):
+        print(f"\nStarting epoch {epoch + 1}/{epochs} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        avg_loss = tf.keras.metrics.Mean(name='total_loss')
+        
+        for step, (images, input_ids, attention_mask, gt_boxes) in enumerate(dataset_tf):
+            total_loss, loss_info = train_step(images, input_ids, attention_mask, gt_boxes, optimizer)
+            avg_loss.update_state(total_loss)
+
+            if step % 10 == 0:
+                print(f"Step {step}: loss={total_loss:.4f}, bce={loss_info['bce']:.4f}, reg={loss_info['reg_loss']:.4f}")
+        
+        print(f"Epoch {epoch + 1} finished. Avg Loss: {avg_loss.result().numpy():.4f}")
         os.makedirs(save_dir, exist_ok=True)
         model.save_weights(os.path.join(save_dir, f'model_epoch_{epoch+1}.weights.h5'))
