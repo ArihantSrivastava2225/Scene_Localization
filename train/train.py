@@ -161,6 +161,8 @@ def train(dataset_dir, year, split, epochs=10, batch_size=8, save_dir='checkpoin
 
         grads = tape.gradient(total_loss, model.trainable_variables)
         optimizer.apply_gradients(zip(grads, model.trainable_variables))
+        if tf.norm(grads[0]) > 0:
+            tf.print("Gradient norm for ResNet layer is non-zero, training is active.")
         
         return total_loss, loss_info
 
