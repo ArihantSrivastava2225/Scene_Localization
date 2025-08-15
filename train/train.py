@@ -284,7 +284,7 @@ def train(dataset_dir, year, split, epochs=10, batch_size=8, save_dir='checkpoin
             avg_loss.update_state(total_loss)
 
             if step % 10 == 0:
-                print(f"Step {step}: loss={total_loss:.4f}, bce={loss_info['bce']:.4f}, reg={loss_info['reg_loss']:.4f}")
+                print(f"Step {step}: loss={total_loss:.4f}, focal={loss_info['focal']:.4f}, reg={loss_info['reg_loss']:.4f}, con={loss_info['contrastive']:.4f}")
         
         print(f"Epoch {epoch + 1} finished. Avg Loss: {avg_loss.result().numpy():.4f}")
         os.makedirs(save_dir, exist_ok=True)
