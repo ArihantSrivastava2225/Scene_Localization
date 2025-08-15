@@ -94,7 +94,6 @@ def contrastive_loss(raw_scores, labels, margin=0.5):
     return pos_loss + neg_loss
 
 
-
 def match_anchors_to_gt(anchors_tf, gt_boxes_tf, pos_iou_thresh=0.5, neg_iou_thresh=0.4):
     """
     Matches anchors to ground truth boxes for a batch.
