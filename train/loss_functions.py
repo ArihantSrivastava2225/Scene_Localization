@@ -176,7 +176,7 @@ def encode_boxes_tf(anchors_tf, matched_gt_tf):
 
 def matching_and_regression_loss(pred_scores, pred_deltas, anchors_tf, gt_boxes_tf, raw_scores,
                                   pos_iou_thresh=0.5, neg_iou_thresh=0.4,
-                                  lambda_reg=1.0, lambda_contrastive=0.1, lambda_focal=1.0):
+                                  lambda_reg=1.0, lambda_contrastive=0.01, lambda_focal=1.0):
     labels, matched_gt = match_anchors_to_gt(anchors_tf, gt_boxes_tf, pos_iou_thresh, neg_iou_thresh)
 
     # FIX: Use focal loss instead of BCE
