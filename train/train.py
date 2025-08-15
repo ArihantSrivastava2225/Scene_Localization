@@ -193,7 +193,8 @@ def train(dataset_dir, year, split, epochs=10, batch_size=8, save_dir='checkpoin
     # Unfreeze encoders for fine-tuning
     model.image_encoder.trainable = True
     model.text_encoder.trainable = True
-    optimizer = tf.keras.optimizers.Adam(learning_rate=fine_tuning_learning_rate)
+    # FIX: Update the learning rate of the existing optimizer in place
+    optimizer.learning_rate.assign(fine_tuning_learning_rate)
     
     for epoch in range(initial_epochs, epochs):
         print(f"\nStarting epoch {epoch + 1}/{epochs} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
