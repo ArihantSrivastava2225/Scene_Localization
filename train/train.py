@@ -165,7 +165,7 @@ def train(dataset_dir, year, split, epochs=10, batch_size=8, save_dir='checkpoin
         return total_loss, loss_info
 
     # --- Phase 1: Train with frozen encoders (for a few epochs) ---
-    initial_epochs = 3
+    initial_epochs = 10
     initial_learning_rate = 1e-4
     print(f"\n--- Starting Phase 1: Training top layers with frozen encoders (for {initial_epochs} epochs) ---")
     
