@@ -14,7 +14,7 @@ from transformers import BertTokenizer
 
 from models.grounding_model import VisualGroundingModel
 from data.anchor_utils import generate_anchor_boxes, decode_boxes_from_deltas
-from train.loss_functions import matching_and_regression_loss
+from train.loss_functions import matching_and_regression_loss, iou_boxes
 
 # --- The RefCOCODataset class has a minor fix for consistency ---
 class RefCOCODataset():
@@ -221,3 +221,70 @@ def train(dataset_dir, year, split, epochs=10, batch_size=8, save_dir='checkpoin
         print(f"Epoch {epoch + 1} finished. Avg Loss: {avg_loss.result().numpy():.4f}")
         os.makedirs(save_dir, exist_ok=True)
         model.save_weights(os.path.join(save_dir, f'model_epoch_{epoch+1}.weights.h5'))
+    
+    # --- Evaluation on Validation Set ---
+    print("\n--- Evaluating model on validation set ---")
+    val_ann_file = os.path.join(dataset_dir, 'annotations_trainval2014', 'annotations', f'instances_val{year}.json')
+    val_img_root = os.path.join(dataset_dir, f'val{year}', f'val{year}')
+    
+    val_dataset = RefCOCODataset(val_ann_file, val_img_root, image_size=image_size, tokenizer=tokenizer)
+    
+    def val_gen():
+        # Use a reasonable number of samples for validation, e.g., all of them or a subset
+        max_val_samples = min(len(val_dataset), 1000) # Limit validation to 1000 samples for speed
+        for i in range(max_val_samples):
+            yield val_dataset[i]
+
+    val_dataset_tf = tf.data.Dataset.from_generator(
+        val_gen, output_types=out_types, output_shapes=output_shapes
+    )
+    val_dataset_tf = val_dataset_tf.batch(batch_size).prefetch(tf.data.AUTOTUNE)
+
+    total_iou = 0.0
+    num_predictions = 0
+
+    for step, (images, input_ids, attention_mask, gt_boxes) in enumerate(val_dataset_tf):
+        B = tf.shape(images)[0]
+        anchors_batched = tf.tile(tf.expand_dims(anchors, axis=0), [B, 1, 1])
+        
+        # Run inference
+        preds = model(images, input_ids, attention_mask, anchors_batched, training=False)
+        raw_scores = preds['scores']
+        deltas = preds['deltas']
+
+        # Convert scores to probabilities
+        scores_prob = tf.sigmoid(raw_scores)
+
+        # Decode predicted boxes
+        # Note: decode_boxes_from_deltas expects numpy arrays. Convert Tensors.
+        decoded_boxes_norm = tf.numpy_function(
+            decode_boxes_from_deltas,
+            [anchors_batched[0], deltas[0]], # Use first image's anchors and deltas for now
+            Tout=tf.float32
+        )
+        decoded_boxes_norm.set_shape((anchors_batched.shape[1], 4)) # Set shape after numpy_function
+
+        # For simplicity, let's just take the top-scoring box for each image in the batch
+        # A full mAP calculation is more complex and involves NMS per image
+        for i in range(B):
+            # Select the top-scoring box for the current image in the batch
+            best_anchor_idx = tf.argmax(scores_prob[i])
+            predicted_box = decoded_boxes_norm[best_anchor_idx]
+            
+            # Ground truth box for the current image
+            gt_box = gt_boxes[i] # Shape (4,)
+
+            # Calculate IoU between predicted and ground truth box
+            # iou_boxes expects [N,4] and [M,4]. Reshape single boxes to [1,4]
+            iou_val = iou_boxes(tf.expand_dims(predicted_box, axis=0), tf.expand_dims(gt_box, axis=0))
+            total_iou += iou_val[0,0] # Extract scalar IoU value
+            num_predictions += 1
+            
+            if step % 10 == 0 and i == 0: # Print for first image in batch every 10 steps
+                print(f"Validation Step {step}, Image {i}: IoU = {iou_val[0,0]:.4f}")
+
+    if num_predictions > 0:
+        average_iou = total_iou / num_predictions
+        print(f"\nAverage IoU on validation set: {average_iou:.4f}")
+    else:
+        print("\nNo predictions made on validation set.")
