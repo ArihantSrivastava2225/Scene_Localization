@@ -188,7 +188,6 @@ def train(dataset_dir, year, split, epochs=10, batch_size=8, save_dir='checkpoin
         avg_loss = tf.keras.metrics.Mean(name='total_loss')
         
         for step, (images, input_ids, attention_mask, gt_boxes) in enumerate(dataset_tf):
-            gt_boxes = cxcywh_to_xyxy(gt_boxes)
             total_loss, loss_info = train_step(images, input_ids, attention_mask, gt_boxes, optimizer)
             avg_loss.update_state(total_loss)
 
@@ -246,7 +245,7 @@ def train(dataset_dir, year, split, epochs=10, batch_size=8, save_dir='checkpoin
                 # Select the top-scoring box for the current image
                 best_anchor_idx = tf.argmax(scores_prob[i])
                 predicted_box = decoded_boxes_norm_i[best_anchor_idx]
-                gt_boxes = cxcywh_to_xyxy(gt_boxes)
+                
                 gt_box = gt_boxes[i]
     
                 iou_val = iou_box(tf.expand_dims(predicted_box, axis=0), tf.expand_dims(gt_box, axis=0))
@@ -279,7 +278,6 @@ def train(dataset_dir, year, split, epochs=10, batch_size=8, save_dir='checkpoin
         avg_loss = tf.keras.metrics.Mean(name='total_loss')
         
         for step, (images, input_ids, attention_mask, gt_boxes) in enumerate(dataset_tf):
-            gt_boxes = cxcywh_to_xyxy(gt_boxes)
             total_loss, loss_info = train_step(images, input_ids, attention_mask, gt_boxes, optimizer)
             avg_loss.update_state(total_loss)
 
@@ -337,7 +335,7 @@ def train(dataset_dir, year, split, epochs=10, batch_size=8, save_dir='checkpoin
                 # Select the top-scoring box for the current image
                 best_anchor_idx = tf.argmax(scores_prob[i])
                 predicted_box = decoded_boxes_norm_i[best_anchor_idx]
-                gt_boxes = cxcywh_to_xyxy(gt_boxes)
+                
                 gt_box = gt_boxes[i]
     
                 iou_val = iou_box(tf.expand_dims(predicted_box, axis=0), tf.expand_dims(gt_box, axis=0))
