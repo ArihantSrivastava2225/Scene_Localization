@@ -153,9 +153,10 @@ def train(dataset_dir, year, split, epochs=10, batch_size=8, save_dir='checkpoin
             preds = model(images, input_ids, attention_mask, anchors_batched, training=True)
             scores = preds['scores']
             deltas = preds['deltas']
+            raw_scores = preds['raw_scores']
             
             total_loss, loss_info = matching_and_regression_loss(
-                scores, deltas, anchors_batched, gt_boxes_reshaped,
+                scores, deltas, anchors_batched, gt_boxes_reshaped, raw_scores, 
                 pos_iou_thresh=0.5, neg_iou_thresh=0.4, lambda_reg=5.0
             )
 
