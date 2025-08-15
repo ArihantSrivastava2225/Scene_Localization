@@ -161,8 +161,6 @@ def train(dataset_dir, year, split, epochs=10, batch_size=8, save_dir='checkpoin
 
         grads = tape.gradient(total_loss, model.trainable_variables)
         optimizer.apply_gradients(zip(grads, model.trainable_variables))
-        if tf.norm(grads[0]) > 0:
-            tf.print("Gradient norm for ResNet layer is non-zero, training is active.")
         
         return total_loss, loss_info
 
@@ -174,6 +172,8 @@ def train(dataset_dir, year, split, epochs=10, batch_size=8, save_dir='checkpoin
     # Ensure encoders are frozen
     model.image_encoder.trainable = False
     model.text_encoder.trainable = False
+
+    print(f"Number of trainable variables: {len(model.trainable_variables)}")
     # FIX: Use a learning rate schedule for the first phase
     # --- Combined learning rate schedule for both phases ---
     # FIX: Use a single, combined schedule
@@ -271,6 +271,8 @@ def train(dataset_dir, year, split, epochs=10, batch_size=8, save_dir='checkpoin
     # Unfreeze encoders for fine-tuning
     model.image_encoder.trainable = True
     model.text_encoder.trainable = True
+
+    print(f"Number of trainable variables: {len(model.trainable_variables)}")
     
     for epoch in range(initial_epochs, epochs):
         print(f"\nStarting epoch {epoch + 1}/{epochs} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
