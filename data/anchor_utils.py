@@ -100,3 +100,13 @@ def decode_boxes_from_deltas(anchors, deltas):
     boxes[:, 2] = np.clip(boxes[:, 2], 0.0, 1.0)
     boxes[:, 3] = np.clip(boxes[:, 3], 0.0, 1.0)
     return boxes
+
+def cxcywh_to_xyxy(boxes):
+    # boxes: [..., 4] -> (cx, cy, w, h) to (x1, y1, x2, y2)
+    cx, cy, w, h = tf.split(boxes, 4, axis=-1)
+    x1 = cx - w / 2.0
+    y1 = cy - h / 2.0
+    x2 = cx + w / 2.0
+    y2 = cy + h / 2.0
+    return tf.concat([x1, y1, x2, y2], axis=-1)
+

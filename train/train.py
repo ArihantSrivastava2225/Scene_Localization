@@ -13,7 +13,7 @@ from tensorflow.keras.preprocessing.sequence import pad_sequences
 from transformers import BertTokenizer
 
 from models.grounding_model import VisualGroundingModel
-from data.anchor_utils import generate_anchor_boxes, decode_boxes_from_deltas
+from data.anchor_utils import generate_anchor_boxes, decode_boxes_from_deltas, cxcywh_to_xyxy
 from train.loss_functions import matching_and_regression_loss, iou_boxes, iou_box
 
 # --- The RefCOCODataset class has a minor fix for consistency ---
@@ -99,8 +99,6 @@ class RefCOCODataset():
 
         return img, input_ids, attention_mask, bbox
 
-# --- The collate_batch function is no longer needed with this dataset setup ---
-
 def train(dataset_dir, year, split, epochs=10, batch_size=8, save_dir='checkpoints', anchors=None):
     if anchors is None:
         raise ValueError("The 'anchors' tensor must be passed to the train function.")
@@ -177,7 +175,7 @@ def train(dataset_dir, year, split, epochs=10, batch_size=8, save_dir='checkpoin
     print(f"Number of trainable variables: {len(model.trainable_variables)}")
     # FIX: Use a learning rate schedule for the first phase
     # --- Combined learning rate schedule for both phases ---
-    # FIX: Use a single, combined schedule
+    # FIX: Use a single, combined schedule, separately it was not working inside @tf.function
     boundaries = [steps_per_epoch * 10]
     values = [1e-4, 1e-5]
     learning_rate_schedule = tf.keras.optimizers.schedules.PiecewiseConstantDecay(boundaries, values)
@@ -190,6 +188,7 @@ def train(dataset_dir, year, split, epochs=10, batch_size=8, save_dir='checkpoin
         avg_loss = tf.keras.metrics.Mean(name='total_loss')
         
         for step, (images, input_ids, attention_mask, gt_boxes) in enumerate(dataset_tf):
+            gt_boxes = cxcywh_to_xyxy(gt_boxes)
             total_loss, loss_info = train_step(images, input_ids, attention_mask, gt_boxes, optimizer)
             avg_loss.update_state(total_loss)
 
@@ -247,7 +246,7 @@ def train(dataset_dir, year, split, epochs=10, batch_size=8, save_dir='checkpoin
                 # Select the top-scoring box for the current image
                 best_anchor_idx = tf.argmax(scores_prob[i])
                 predicted_box = decoded_boxes_norm_i[best_anchor_idx]
-                
+                gt_boxes = cxcywh_to_xyxy(gt_boxes)
                 gt_box = gt_boxes[i]
     
                 iou_val = iou_box(tf.expand_dims(predicted_box, axis=0), tf.expand_dims(gt_box, axis=0))
@@ -280,6 +279,7 @@ def train(dataset_dir, year, split, epochs=10, batch_size=8, save_dir='checkpoin
         avg_loss = tf.keras.metrics.Mean(name='total_loss')
         
         for step, (images, input_ids, attention_mask, gt_boxes) in enumerate(dataset_tf):
+            gt_boxes = cxcywh_to_xyxy(gt_boxes)
             total_loss, loss_info = train_step(images, input_ids, attention_mask, gt_boxes, optimizer)
             avg_loss.update_state(total_loss)
 
@@ -337,7 +337,7 @@ def train(dataset_dir, year, split, epochs=10, batch_size=8, save_dir='checkpoin
                 # Select the top-scoring box for the current image
                 best_anchor_idx = tf.argmax(scores_prob[i])
                 predicted_box = decoded_boxes_norm_i[best_anchor_idx]
-                
+                gt_boxes = cxcywh_to_xyxy(gt_boxes)
                 gt_box = gt_boxes[i]
     
                 iou_val = iou_box(tf.expand_dims(predicted_box, axis=0), tf.expand_dims(gt_box, axis=0))

@@ -1,6 +1,7 @@
 import tensorflow as tf
 import numpy as np
 
+#iou_boxes function for training purpose
 def iou_boxes(boxes1, boxes2):
     """
     Computes Intersection-over-Union (IoU) for a batch of boxes.
@@ -28,6 +29,7 @@ def iou_boxes(boxes1, boxes2):
     
     return iou
 
+# iou_box function to be used for validation purpose 
 def iou_box(box1, box2):
     """
     Computes Intersection-over-Union (IoU) between two sets of boxes.
