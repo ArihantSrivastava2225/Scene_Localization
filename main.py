@@ -75,7 +75,7 @@ def main():
             epochs=50,
             batch_size=32,
             save_dir='/kaggle/working/checkpointskaggle', # FIX: Use Kaggle's working directory
-            # save_dir='/data/coco',
+            # save_dir='/checkpoints',
             anchors=anchors
         )
 

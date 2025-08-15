@@ -5,5 +5,5 @@ __pycache__/
 *.pyd
 
 # Ignore ML model files
-*.h5
-*.ckpt
+# *.h5
+# *.ckpt
