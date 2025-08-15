@@ -74,7 +74,7 @@ def main():
             split=train_split,
             epochs=50,
             batch_size=32,
-            save_dir='/kaggle/working/checkpointskaggle', # FIX: Use Kaggle's working directory
+            save_dir='/kaggle/working/checkpointskaggle2', # FIX: Use Kaggle's working directory
             # save_dir='/checkpoints',
             anchors=anchors
         )
