@@ -168,8 +168,12 @@ def train(dataset_dir, year, split, epochs=10, batch_size=8, save_dir='checkpoin
     # Ensure encoders are frozen
     model.image_encoder.trainable = False
     model.text_encoder.trainable = False
-    optimizer = tf.keras.optimizers.Adam(learning_rate=initial_learning_rate)
-    
+    # FIX: Use a learning rate schedule for the first phase
+    lr_schedule_phase1 = tf.keras.optimizers.schedules.ExponentialDecay(
+        initial_learning_rate, decay_steps=len(dataset_tf)*5, decay_rate=0.9
+    )
+    optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule_phase1)
+
     for epoch in range(initial_epochs):
         print(f"\nStarting epoch {epoch + 1}/{initial_epochs} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         avg_loss = tf.keras.metrics.Mean(name='total_loss')
@@ -193,8 +197,11 @@ def train(dataset_dir, year, split, epochs=10, batch_size=8, save_dir='checkpoin
     # Unfreeze encoders for fine-tuning
     model.image_encoder.trainable = True
     model.text_encoder.trainable = True
-    # FIX: Update the learning rate of the existing optimizer in place
-    optimizer.learning_rate.assign(fine_tuning_learning_rate)
+    # FIX: Use a new learning rate schedule for the fine-tuning phase
+    lr_schedule_phase2 = tf.keras.optimizers.schedules.ExponentialDecay(
+        fine_tuning_learning_rate, decay_steps=len(dataset_tf)*10, decay_rate=0.95
+    )
+    optimizer.learning_rate.assign(lr_schedule_phase2)
     
     for epoch in range(initial_epochs, epochs):
         print(f"\nStarting epoch {epoch + 1}/{epochs} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")

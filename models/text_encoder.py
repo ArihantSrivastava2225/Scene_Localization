@@ -6,6 +6,7 @@ class TransformerTextEncoder(tf.keras.Model):
         super().__init__(**kwargs)
         self.bert = TFBertModel.from_pretrained(pretrained_model_name, from_pt=True)
         self.bert.trainable = trainable  # Freeze or fine-tune BERT
+        print(trainable)
 
     def call(self, input_ids, attention_mask=None):
         """
