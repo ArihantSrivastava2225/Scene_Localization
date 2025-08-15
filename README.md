@@ -46,6 +46,8 @@ After the model is trained and you have a checkpoint file, you can run inference
     ```bash
     python main.py --mode infer --image data\coco\val2014\COCO_val2014_000000000136.jpg --query "the giraffe nearer to the window and also nearer to the people watching" --ckpt checkpoints\model_epoch_50.weights.h5
     ```
+    Eg: ![WhatsApp Image 2025-08-15 at 21 49 36_29ef05a4](https://github.com/user-attachments/assets/2515eed2-eee6-4abe-88b8-3dcdeadce153)
+for python main.py --mode infer --image data\coco\val2014\COCO_val2014_000000000136.jpg --query "the giraffe nearer to the window and also nearer to the people watching" --ckpt checkpoints\model_epoch_50.weights.h5
 
 ### 3. Training
 
