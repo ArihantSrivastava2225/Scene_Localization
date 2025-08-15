@@ -27,6 +27,40 @@ def iou_boxes(boxes1, boxes2):
     
     return iou
 
+# train/loss_functions.py
+
+import tensorflow as tf
+import numpy as np
+
+
+def iou_box(box1, box2):
+    """
+    Computes Intersection-over-Union (IoU) between two sets of boxes.
+    boxes1: [N, 4] and boxes2: [M, 4] with normalized coords [y1, x1, y2, x2].
+    Returns IoU matrix: [N, M]
+    """
+    # FIX: Expand dims for broadcasting only for the core calculation
+    boxes1_exp = tf.expand_dims(box1, axis=1)  # [N, 1, 4]
+    boxes2_exp = tf.expand_dims(box2, axis=0)  # [1, M, 4]
+    
+    # Coordinates of the intersection box
+    inter_x1 = tf.maximum(boxes1_exp[..., 1], boxes2_exp[..., 1])
+    inter_y1 = tf.maximum(boxes1_exp[..., 0], boxes2_exp[..., 0])
+    inter_x2 = tf.minimum(boxes1_exp[..., 3], boxes2_exp[..., 3])
+    inter_y2 = tf.minimum(boxes1_exp[..., 2], boxes2_exp[..., 2])
+    
+    inter_w = tf.maximum(0.0, inter_x2 - inter_x1)
+    inter_h = tf.maximum(0.0, inter_y2 - inter_y1)
+    inter_area = inter_w * inter_h
+    
+    # Area of boxes1 and boxes2
+    area1 = (boxes1_exp[..., 3] - boxes1_exp[..., 1]) * (boxes1_exp[..., 2] - boxes1_exp[..., 0])
+    area2 = (boxes2_exp[..., 3] - boxes2_exp[..., 1]) * (boxes2_exp[..., 2] - boxes2_exp[..., 0])
+    
+    union = area1 + area2 - inter_area + 1e-8
+    iou = inter_area / union
+    
+    return iou
 
 def match_anchors_to_gt(anchors_tf, gt_boxes_tf, pos_iou_thresh=0.5, neg_iou_thresh=0.4):
     """
