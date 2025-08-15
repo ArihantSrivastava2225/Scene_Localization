@@ -160,33 +160,33 @@ def train(dataset_dir, year, split, epochs=10, batch_size=8, save_dir='checkpoin
         
         return total_loss, loss_info
 
-    # # --- Phase 1: Train with frozen encoders (for a few epochs) ---
-    # initial_epochs = 3
-    # initial_learning_rate = 1e-4
-    # print(f"\n--- Starting Phase 1: Training top layers with frozen encoders (for {initial_epochs} epochs) ---")
+    # --- Phase 1: Train with frozen encoders (for a few epochs) ---
+    initial_epochs = 3
+    initial_learning_rate = 1e-4
+    print(f"\n--- Starting Phase 1: Training top layers with frozen encoders (for {initial_epochs} epochs) ---")
     
-    # # Ensure encoders are frozen
-    # model.image_encoder.trainable = False
-    # model.text_encoder.trainable = False
-    # optimizer = tf.keras.optimizers.Adam(learning_rate=initial_learning_rate)
+    # Ensure encoders are frozen
+    model.image_encoder.trainable = False
+    model.text_encoder.trainable = False
+    optimizer = tf.keras.optimizers.Adam(learning_rate=initial_learning_rate)
     
-    # for epoch in range(initial_epochs):
-    #     print(f"\nStarting epoch {epoch + 1}/{initial_epochs} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    #     avg_loss = tf.keras.metrics.Mean(name='total_loss')
+    for epoch in range(initial_epochs):
+        print(f"\nStarting epoch {epoch + 1}/{initial_epochs} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        avg_loss = tf.keras.metrics.Mean(name='total_loss')
         
-    #     for step, (images, input_ids, attention_mask, gt_boxes) in enumerate(dataset_tf):
-    #         total_loss, loss_info = train_step(images, input_ids, attention_mask, gt_boxes, optimizer)
-    #         avg_loss.update_state(total_loss)
+        for step, (images, input_ids, attention_mask, gt_boxes) in enumerate(dataset_tf):
+            total_loss, loss_info = train_step(images, input_ids, attention_mask, gt_boxes, optimizer)
+            avg_loss.update_state(total_loss)
 
-    #         if step % 10 == 0:
-    #             print(f"Step {step}: loss={total_loss:.4f}, bce={loss_info['bce']:.4f}, reg={loss_info['reg_loss']:.4f}")
+            if step % 10 == 0:
+                print(f"Step {step}: loss={total_loss:.4f}, bce={loss_info['bce']:.4f}, reg={loss_info['reg_loss']:.4f}")
         
-    #     print(f"Epoch {epoch + 1} finished. Avg Loss: {avg_loss.result().numpy():.4f}")
-    #     os.makedirs(save_dir, exist_ok=True)
-    #     model.save_weights(os.path.join(save_dir, f'model_epoch_{epoch+1}.weights.h5'))
+        print(f"Epoch {epoch + 1} finished. Avg Loss: {avg_loss.result().numpy():.4f}")
+        os.makedirs(save_dir, exist_ok=True)
+        model.save_weights(os.path.join(save_dir, f'model_epoch_{epoch+1}.weights.h5'))
 
     # --- Phase 2: Unfreeze and fine-tune encoders (for remaining epochs) ---
-    fine_tuning_epochs = epochs - 3
+    fine_tuning_epochs = epochs - initial_epochs
     fine_tuning_learning_rate = 1e-5
     print(f"\n--- Starting Phase 2: Fine-tuning encoders with low learning rate (for {fine_tuning_epochs} epochs) ---")
     
@@ -195,7 +195,7 @@ def train(dataset_dir, year, split, epochs=10, batch_size=8, save_dir='checkpoin
     model.text_encoder.trainable = True
     optimizer = tf.keras.optimizers.Adam(learning_rate=fine_tuning_learning_rate)
     
-    for epoch in range(3, epochs):
+    for epoch in range(initial_epochs, epochs):
         print(f"\nStarting epoch {epoch + 1}/{epochs} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         avg_loss = tf.keras.metrics.Mean(name='total_loss')
         
