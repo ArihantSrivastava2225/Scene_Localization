@@ -14,7 +14,7 @@ from transformers import BertTokenizer
 
 from models.grounding_model import VisualGroundingModel
 from data.anchor_utils import generate_anchor_boxes, decode_boxes_from_deltas
-from train.loss_functions import matching_and_regression_loss, iou_boxes
+from train.loss_functions import matching_and_regression_loss, iou_boxes, iou_box
 
 # --- The RefCOCODataset class has a minor fix for consistency ---
 class RefCOCODataset():
@@ -247,7 +247,7 @@ def train(dataset_dir, year, split, epochs=10, batch_size=8, save_dir='checkpoin
                 
                 gt_box = gt_boxes[i]
     
-                iou_val = iou_boxes(tf.expand_dims(predicted_box, axis=0), tf.expand_dims(gt_box, axis=0))
+                iou_val = iou_box(tf.expand_dims(predicted_box, axis=0), tf.expand_dims(gt_box, axis=0))
                 total_iou += iou_val[0,0]
                 num_predictions += 1
                 
@@ -335,7 +335,7 @@ def train(dataset_dir, year, split, epochs=10, batch_size=8, save_dir='checkpoin
                 
                 gt_box = gt_boxes[i]
     
-                iou_val = iou_boxes(tf.expand_dims(predicted_box, axis=0), tf.expand_dims(gt_box, axis=0))
+                iou_val = iou_box(tf.expand_dims(predicted_box, axis=0), tf.expand_dims(gt_box, axis=0))
                 total_iou += iou_val[0,0]
                 num_predictions += 1
                 
