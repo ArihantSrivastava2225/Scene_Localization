@@ -62,7 +62,7 @@ class VisualGroundingModel(tf.keras.Model):
         
         query_embs = self.text_encoder(input_ids, attention_mask, training=training)
         
-        attended_feats = self.scorer(
+        attended_feats, raw_scores = self.scorer(
             anchors_proj, 
             query_embs, 
             query_mask=attention_mask,
@@ -78,4 +78,4 @@ class VisualGroundingModel(tf.keras.Model):
 
         # FIX: The original code returned a tiled version of 'all_anchors', which was an issue.
         # Now, `all_anchors` is already batched correctly and should be returned directly.
-        return {"scores": scores_reshaped, "deltas": deltas, "anchors": all_anchors}
+        return {"scores": scores_reshaped, "deltas": deltas, "anchors": all_anchors, "raw_scores": raw_scores}
