@@ -118,6 +118,10 @@ def train(dataset_dir, year, split, epochs=10, batch_size=8, save_dir='checkpoin
         for i in range(min(len(dataset), max_samples)):
             yield dataset[i]
 
+    # FIX: Calculate steps per epoch manually
+    max_samples_in_training = 10000
+    steps_per_epoch = max_samples_in_training // batch_size
+
     out_types = (tf.float32, tf.int32, tf.int32, tf.float32)
     output_shapes = (tf.TensorShape(image_size + (3,)), tf.TensorShape([20]), tf.TensorShape([20]), tf.TensorShape([4]))
     
@@ -170,7 +174,7 @@ def train(dataset_dir, year, split, epochs=10, batch_size=8, save_dir='checkpoin
     model.text_encoder.trainable = False
     # FIX: Use a learning rate schedule for the first phase
     lr_schedule_phase1 = tf.keras.optimizers.schedules.ExponentialDecay(
-        initial_learning_rate, decay_steps=len(dataset_tf)*5, decay_rate=0.9
+        initial_learning_rate, decay_steps=steps_per_epoch*5, decay_rate=0.9
     )
     optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule_phase1)
 
@@ -199,10 +203,10 @@ def train(dataset_dir, year, split, epochs=10, batch_size=8, save_dir='checkpoin
     model.text_encoder.trainable = True
     # FIX: Use a new learning rate schedule for the fine-tuning phase
     lr_schedule_phase2 = tf.keras.optimizers.schedules.ExponentialDecay(
-        fine_tuning_learning_rate, decay_steps=len(dataset_tf)*10, decay_rate=0.95
+        fine_tuning_learning_rate, decay_steps=steps_per_epoch*10, decay_rate=0.95
     )
     optimizer.learning_rate.assign(lr_schedule_phase2)
-    
+
     for epoch in range(initial_epochs, epochs):
         print(f"\nStarting epoch {epoch + 1}/{epochs} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         avg_loss = tf.keras.metrics.Mean(name='total_loss')
